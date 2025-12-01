@@ -1,21 +1,54 @@
+import express from "express";
 import { Telegraf } from "telegraf";
 import userModel from "./src/models/User.js";
 import connectDb from "./src/config/db.js";
 import { message } from "telegraf/filters";
 import eventModel from "./src/models/Event.js";
 import fetch from "node-fetch";
-
 import dotenv from "dotenv";
-dotenv.config();
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
-
-try {
-  connectDb();
-} catch (err) {
-  process.kill(process.pid, "SIGTERM");
+// Load .env only when running locally
+if (!process.env.BOT_TOKEN) {
+  dotenv.config();
 }
 
+const app = express();
+app.use(express.json());
+
+// Telegram Bot Init
+const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// Webhook path (Telegram will send updates here)
+const WEBHOOK_PATH = "/telegram/webhook";
+
+// Your Choreo domain (Added in Choreo ENV: WEBHOOK_URL)
+const DOMAIN = process.env.WEBHOOK_URL;
+
+// Set webhook only if DOMAIN exists
+if (DOMAIN) {
+  console.log("Setting webhook...");
+  await bot.telegram.setWebhook(`${DOMAIN}${WEBHOOK_PATH}`);
+}
+
+// Register webhook with express
+app.use(bot.webhookCallback(WEBHOOK_PATH));
+
+/* ------------------------
+   CONNECT DATABASE
+------------------------ */
+try {
+  connectDb();
+  console.log("MongoDB Connected");
+} catch (err) {
+  console.error("DB Connection ERROR:", err);
+  process.exit(1);
+}
+
+/* ------------------------
+       BOT COMMANDS
+------------------------ */
+
+// /start command
 bot.start(async (ctx) => {
   const from = ctx.update.message.from;
 
@@ -32,8 +65,9 @@ bot.start(async (ctx) => {
       },
       { upsert: true }
     );
+
     await ctx.reply(
-      `Hey! ${from.first_name}, Welcome. I will be writing highly engaging social media posts for you. Keep feeding me your events.`
+      `Hey! ${from.first_name}, Welcome. I will write highly engaging social media posts for you. Keep feeding me your events.`
     );
   } catch (err) {
     console.log(err);
@@ -41,35 +75,33 @@ bot.start(async (ctx) => {
   }
 });
 
+// /generate command
 bot.command("generate", async (ctx) => {
   const from = ctx.update.message.from;
 
-  const { message_id: waitingMessageId } = await ctx.reply(
+  const { message_id: waitMsg } = await ctx.reply(
     `Hey! ${from.first_name}, Kindly wait a moment. I am curating posts for you`
   );
 
-  const { message_id: loadingStickerMsgId } = await ctx.replyWithSticker(
-    'CAACAgIAAxkBAAMUaSyLiRsrspRIkG1QS3gQYCit4ToAAl4SAALsmSlJfO_ZpUf3ZDs2BA'
+  const { message_id: stickerMsg } = await ctx.replyWithSticker(
+    "CAACAgIAAxkBAAMUaSyLiRsrspRIkG1QS3gQYCit4ToAAl4SAALsmSlJfO_ZpUf3ZDs2BA"
   );
 
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfTheDay = new Date();
-  endOfTheDay.setHours(23, 59, 59, 999);
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
 
   const events = await eventModel.find({
     tgId: from.id,
-    createdAt: {
-      $gte: startOfDay,
-      $lte: endOfTheDay,
-    },
+    createdAt: { $gte: start, $lte: end },
   });
 
   if (events.length === 0) {
-    await ctx.deleteMessage(waitingMessageId);
-    await ctx.deleteMessage(loadingStickerMsgId);
-    await ctx.reply("No events found for the day.");
-    return;
+    await ctx.deleteMessage(waitMsg);
+    await ctx.deleteMessage(stickerMsg);
+    return ctx.reply("No events found for the day.");
   }
 
   try {
@@ -104,8 +136,8 @@ bot.command("generate", async (ctx) => {
     const data = await response.json();
     const aiText = data.choices?.[0]?.message?.content || "No response.";
 
-    await ctx.deleteMessage(loadingStickerMsgId);
-    await ctx.deleteMessage(waitingMessageId);
+    await ctx.deleteMessage(waitMsg);
+    await ctx.deleteMessage(stickerMsg);
 
     await ctx.reply(aiText);
   } catch (err) {
@@ -114,14 +146,17 @@ bot.command("generate", async (ctx) => {
   }
 });
 
+// Text listener (save events)
 bot.on(message("text"), async (ctx) => {
   const from = ctx.update.message.from;
-  const message = ctx.update.message.text;
+  const text = ctx.update.message.text;
+
   try {
     await eventModel.create({
-      text: message,
+      text,
       tgId: from.id,
     });
+
     await ctx.reply(
       "Noted. Keep texting me your thoughts. To generate posts, type /generate"
     );
@@ -131,7 +166,12 @@ bot.on(message("text"), async (ctx) => {
   }
 });
 
-bot.launch();
+/* ------------------------
+     START EXPRESS SERVER
+------------------------ */
 
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Telegram bot running on webhook mode at PORT:", PORT);
+});
