@@ -7,7 +7,6 @@ import eventModel from "./src/models/Event.js";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 
-// Load .env only when running locally
 if (!process.env.BOT_TOKEN) {
   dotenv.config();
 }
@@ -15,27 +14,20 @@ if (!process.env.BOT_TOKEN) {
 const app = express();
 app.use(express.json());
 
-// Telegram Bot Init
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// Webhook path (Telegram will send updates here)
 const WEBHOOK_PATH = "/telegram/webhook";
 
-// Your Choreo domain (Added in Choreo ENV: WEBHOOK_URL)
 const DOMAIN = process.env.WEBHOOK_URL;
 
-// Set webhook only if DOMAIN exists
 if (DOMAIN) {
   console.log("Setting webhook...");
   await bot.telegram.setWebhook(`${DOMAIN}${WEBHOOK_PATH}`);
 }
 
-// Register webhook with express
 app.use(bot.webhookCallback(WEBHOOK_PATH));
 
-/* ------------------------
-   CONNECT DATABASE
------------------------- */
+
 try {
   connectDb();
   console.log("MongoDB Connected");
@@ -44,11 +36,8 @@ try {
   process.exit(1);
 }
 
-/* ------------------------
-       BOT COMMANDS
------------------------- */
 
-// /start command
+
 bot.start(async (ctx) => {
   const from = ctx.update.message.from;
 
@@ -67,7 +56,7 @@ bot.start(async (ctx) => {
     );
 
     await ctx.reply(
-      `Hey! ${from.first_name}, Welcome. I will write highly engaging social media posts for you. Keep feeding me your events.`
+      `Hey! ${from.first_name}, Welcome. I am Prachi Singh's caption bot and I will write highly engaging social media posts for you. Keep feeding me your events.`
     );
   } catch (err) {
     console.log(err);
@@ -75,7 +64,6 @@ bot.start(async (ctx) => {
   }
 });
 
-// /generate command
 bot.command("generate", async (ctx) => {
   const from = ctx.update.message.from;
 
@@ -146,7 +134,6 @@ bot.command("generate", async (ctx) => {
   }
 });
 
-// Text listener (save events)
 bot.on(message("text"), async (ctx) => {
   const from = ctx.update.message.from;
   const text = ctx.update.message.text;
@@ -166,9 +153,7 @@ bot.on(message("text"), async (ctx) => {
   }
 });
 
-/* ------------------------
-     START EXPRESS SERVER
------------------------- */
+
 
 const PORT = process.env.PORT || 3000;
 
